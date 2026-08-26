@@ -1,0 +1,94 @@
+# =============================================================================
+#  NN-DPD Online RF PA — fichiers exclus du dépôt
+#
+#  Principe : le dépôt contient le CODE et les MESURES (CSV, XLSX), pas les
+#  états intermédiaires régénérables. Toute exclusion ci-dessous est
+#  reproductible en relançant run_all.m puis run_montecarlo.m.
+#
+#  Volume : 302 Mo avant filtrage, environ 13 Mo après.
+# =============================================================================
+
+# --- États MATLAB volumineux et régénérables -------------------------------
+# Les .mat de results/ pèsent près de 290 Mo à eux seuls (allResults.mat
+# atteint 61 Mo, au-delà de la limite de confort de GitHub). Ils sont
+# entièrement reconstruits par run_all.m.
+results/**/*.mat
+
+# EXCEPTION : l'agent DQN entraîné doit être versionné. Sans lui, le
+# scénario S8 bascule sur la politique heuristique et les résultats du
+# mémoire ne sont plus reproductibles à l'identique. Il ne pèse que 230 Ko.
+!rl_policy/dqn_agent.mat
+
+# --- Sauvegardes et brouillons ---------------------------------------------
+_archive/
+_build/
+*.bak
+*.asv
+*.m~
+
+# --- Sorties LaTeX régénérables --------------------------------------------
+*.aux
+*.log
+*.bbl
+*.blg
+*.out
+*.toc
+*.lof
+*.lot
+*.maf
+*.mtc*
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+
+# --- Sources du mémoire ------------------------------------------------------
+# Ce dossier a servi de cible à la synchronisation Overleaf : il contient des
+# .tex du mémoire périmés de plusieurs semaines (chap1EtatArt.tex y date du
+# 5 août, la version courante du 24). Le dépôt publie le BANC, pas le mémoire ;
+# les sources LaTeX vivent dans leur propre projet.
+*.tex
+*.bib
+*.pdf
+*.bcf
+*.run.xml
+
+# --- MATLAB : code généré ---------------------------------------------------
+slprj/
+codegen/
+*.mex*
+
+# --- Document de travail ------------------------------------------------------
+# Explication de la structure du code, tenue hors du dépôt à la demande.
+explication.md
+
+# --- Balayages périmés --------------------------------------------------------
+# Quatre balayages antérieurs, remplacés par le plan croisé complet de
+# results/sweep_bw_mod/sweep_bande_modulation.csv (540 lignes, 3 bandes x
+# 4 modulations x 9 scénarios). Leurs couvertures diffèrent entre elles et du
+# plan final ; les publier n'apporterait qu'une source de confusion, aucune
+# valeur citée dans le mémoire n'en provenant.
+results/sweep_bw/
+
+# --- Sauvegardes de résultats -------------------------------------------------
+# Instantané d'une exécution Monte-Carlo antérieure à trois scénarios, avant
+# l'ajout de S7. Le fichier courant results/montecarlo/montecarlo_raw.csv le
+# remplace intégralement.
+results/montecarlo/_sauvegarde_S2S6S8/
+
+# --- Instantané de résultats périmé -------------------------------------------
+# Version du 3 juillet du tableau de synthèse, antérieure au réentraînement de
+# l'agent DQN et à la correction de la géométrie de mesure ACPR. Ses valeurs
+# contredisent celles du mémoire ; summary_all_scenarios.xlsx fait foi.
+results/tables/summary_all_scenariosv3juillet.xlsx
+
+# --- Rapport de validation ----------------------------------------------------
+# Régénéré par validate_project.m et contenant les chemins absolus de la
+# machine qui l'a produit.
+results/tables/validation_report.txt
+
+# --- Fichiers temporaires de bureautique --------------------------------------
+~$*
+
+# --- Système ----------------------------------------------------------------
+.DS_Store
+Thumbs.db
