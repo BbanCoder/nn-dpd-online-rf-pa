@@ -98,7 +98,19 @@ if cfg.nn.enabled && isfield(cfg,'toolboxes') && cfg.toolboxes.deepLearning
         ids = (1+(b-1)*blockSize):min(b*blockSize,N);
         xBlock = x(ids);
         profBlock = sliceProfileLocal(dynProfile, ids);
-        zBlock = applyNNDPD(xBlock, currentModel, cfg);
+        % --- Continuite de la ligne a retards entre blocs : on prefixe le
+        % bloc des M derniers echantillons du precedent, puis on retire ce
+        % prefixe de la sortie. Sans cela, les M premiers echantillons de
+        % chaque bloc ne sont pas predistordus (artefact de decoupage
+        % absent du bras statique, qui traite le signal d'un seul tenant).
+        Mh = cfg.nn.memoryDepth;
+        if ids(1) > Mh
+            xExt = x(ids(1)-Mh:ids(end));
+            zExt = applyNNDPD(xExt, currentModel, cfg);
+            zBlock = zExt(Mh+1:end);
+        else
+            zBlock = applyNNDPD(xBlock, currentModel, cfg);
+        end
         yBlock = paDynamicModel(zBlock, cfg, profBlock, paType);
         yNNAdapt(ids) = yBlock;
         mAdapt = computeMetricsLocal(yBlock, xBlock, cfg);
@@ -109,6 +121,15 @@ if cfg.nn.enabled && isfield(cfg,'toolboxes') && cfg.toolboxes.deepLearning
         end
         state.bestNMSE = min(state.bestNMSE, mAdapt.NMSE_dB);
         state.baselineNMSE = min(state.baselineNMSE, mAdapt.NMSE_dB);
+        % dispersion saine : ecart-type du NMSE sur les premiers blocs, avant
+        % toute derive et avant toute mise a jour
+        nH = 6; if isfield(cfg.adaptation,'healthyBlocks'), nH = cfg.adaptation.healthyBlocks; end
+        if b <= nH && state.numAdaptations == 0
+            if ~isfield(state,'healthyNMSE'), state.healthyNMSE = []; end
+            state.healthyNMSE(end+1) = mAdapt.NMSE_dB;
+            state.healthyStd = std(state.healthyNMSE);
+            if numel(state.healthyNMSE) < 3, state.healthyStd = inf; end
+        end
         timeline.block(end+1) = b;
         timeline.NMSE_static(end+1) = mStatic.NMSE_dB;
         timeline.NMSE_adapt(end+1) = mAdapt.NMSE_dB;

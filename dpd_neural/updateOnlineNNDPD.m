@@ -25,7 +25,22 @@ trnIds = perm(nVal+1:end);
 if isempty(trnIds), trnIds = valIds; end
 XnT = Xn(:,trnIds); TT = T(:,trnIds);
 XnV = Xn(:,valIds); TV = T(:,valIds);
+% --- Garde-fou v2 : la perte est mesuree sur le jeu d'ANCRAGE, fixe depuis
+% l'entrainement hors ligne et jamais employe pour une mise a jour. Le
+% jugement sur les donnees du bloc (XnV) ne detecterait pas une perte de
+% generalisation, puisque s'ajuster au bloc fait baisser cette perte-la.
+useAnchor = isfield(model,'anchor') && ~isempty(model.anchor);
+if useAnchor
+    XnV = model.anchor.Xn; TV = model.anchor.T;
+end
 oldLoss = evaluateLossLocal(model, XnV, TV);
+% --- Garde-fou de bout en bout : NMSE reel apres predistorsion + PA nominal.
+% L'erreur quadratique sur le post-inverse ne voit pas une degradation
+% concentree dans les cretes, la ou le PA sature ; le NMSE la voit.
+e2e = useAnchor && isfield(model.anchor,'xRef') && isfield(cfg,'pa');
+if e2e
+    oldNMSE = anchorNMSELocal(model, cfg);
+end
 
 if ~(isfield(model,'hasDeepLearning') && model.hasDeepLearning && ~isempty(model.net))
     A = [XnT; ones(1,size(XnT,2))].';
@@ -69,7 +84,15 @@ end
 model.net = net;
 newLoss = evaluateLossLocal(model, XnV, TV);
 reverted = false;
-if newLoss > 1.05*max(oldLoss, eps)
+tol = 1.05;
+if isfield(cfg.adaptation,'anchorTolerance'), tol = cfg.adaptation.anchorTolerance; end
+rejet = newLoss > tol*max(oldLoss, eps);
+if e2e
+    newNMSE = anchorNMSELocal(model, cfg);
+    tolDB = 0.10; if isfield(cfg.adaptation,'anchorToleranceDB'), tolDB = cfg.adaptation.anchorToleranceDB; end
+    rejet = rejet || (newNMSE > oldNMSE + tolDB);
+end
+if rejet
     model = oldModel;
     newLoss = oldLoss;
     reverted = true;
@@ -100,4 +123,12 @@ if nargin >= 5 && mu > 0
     loss = loss + mu * pen;
 end
 gradients = dlgradient(loss, net.Learnables);
+end
+
+function nm = anchorNMSELocal(model, cfg)
+x = model.anchor.xRef(:);
+z = applyNNDPD(x, model, cfg);
+prof = generatePADriftProfile(numel(x), cfg, 'nominal');
+y = paDynamicModel(z, cfg, prof, upper(cfg.pa.model));
+nm = computeNMSE(y, x);
 end

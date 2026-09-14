@@ -56,7 +56,11 @@ cfg.nn.enabled = true;
 cfg.nn.architecture = 'RVTDNN';
 cfg.nn.memoryDepth = 4;
 cfg.nn.hiddenUnits = [48 32];
-cfg.nn.maxEpochsOffline = 5;
+cfg.nn.maxEpochsOffline = 300;          % budget plafond ; l'arret anticipe decide
+cfg.nn.validationFraction = 0.20;       % paires tenues a l'ecart de l'optimiseur
+cfg.nn.earlyStopPatience = 8;           % epoques sans amelioration avant arret
+cfg.nn.lrDecayFactor = 0.5;             % division du pas quand la validation stagne
+cfg.nn.lrDecayPatience = 4;
 cfg.nn.miniBatchSize = 512;
 cfg.nn.learningRateOffline = 5e-4;
 cfg.nn.learningRateOnline = 5e-5;
@@ -81,6 +85,9 @@ cfg.thresholds.ACPR_dBc = -45;
 % above remain conformity criteria but are unreachable at this drive level
 % and would otherwise trigger continuously, wasting the adaptation budget.
 cfg.adaptation.relNMSE_dB = 2;
+cfg.adaptation.triggerSigma = 4;        % v2 : seuil >= 4 ecarts-types du NMSE sain
+cfg.adaptation.healthyBlocks = 6;       % v2 : blocs servant a estimer la dispersion
+cfg.adaptation.anchorTolerance = 1.02;  % v2 : rejet si la perte d'ancrage monte de > 2 %
 cfg.adaptation.minSamples = 4096;
 cfg.adaptation.blockSize = 4096;
 cfg.adaptation.miniBatchSize = 512;

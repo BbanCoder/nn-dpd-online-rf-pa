@@ -26,6 +26,13 @@ if isfield(state,'baselineNMSE') && isfinite(state.baselineNMSE)
 elseif isfield(state,'bestNMSE') && isfinite(state.bestNMSE)
     ref = state.bestNMSE;
 end
+% --- Seuil v2 : relDelta est borne par en bas par k ecarts-types du NMSE
+% observe sur les blocs sains. Avec un reseau tres bien entraine, la
+% reference devient basse et un delta fixe reagit au bruit inter-blocs ;
+% le seuil suit alors la dispersion effective du reseau.
+if isfield(state,'healthyStd') && isfinite(state.healthyStd) && isfield(cfg.adaptation,'triggerSigma')
+    relDelta = max(relDelta, cfg.adaptation.triggerSigma * state.healthyStd);
+end
 trigger = isfinite(ref) && metrics.NMSE_dB > ref + relDelta;
 allowed = state.blocksSinceLastUpdate >= cfg.adaptation.cooldownBlocks && ...
           state.numAdaptations < cfg.adaptation.maxAdaptations;

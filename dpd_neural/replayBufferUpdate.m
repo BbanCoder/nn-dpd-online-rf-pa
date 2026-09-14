@@ -16,6 +16,19 @@ if ~isfield(replayBuffer,'peakIn')
     replayBuffer.peakTgt = {};
     replayBuffer.peakVal = [];
 end
+% V1 — fraîcheur des crêtes rejouées. Chaque fenêtre porte un âge, exprimé en
+% nombre de mises à jour écoulées depuis sa capture. Sous dérive, une paire ILA
+% (y,z) capturée il y a plusieurs mises à jour décrit un PA qui n'existe plus :
+% la réinjecter enseigne au réseau un comportement périmé. Le tri par seule
+% amplitude conserve indéfiniment la fenêtre d'amorçage issue du PA nominal,
+% puisqu'elle porte la crête globale du signal.
+% peakMaxAge = Inf reproduit exactement le comportement antérieur.
+if ~isfield(replayBuffer,'peakAge')
+    replayBuffer.peakAge = zeros(1, numel(replayBuffer.peakVal));
+end
+if isfield(cfg.adaptation,'peakMaxAge'), peakMaxAge = cfg.adaptation.peakMaxAge;
+else,                                    peakMaxAge = Inf; end
+replayBuffer.peakAge = replayBuffer.peakAge + 1;   % vieillissement
 nNew = numel(newInput);
 nReplay = min(numel(replayBuffer.input), round(cfg.adaptation.replayRatio*nNew));
 if nReplay > 0
@@ -36,12 +49,27 @@ hi = min(nNew, pkIdx + win/2 - 1);
 replayBuffer.peakIn{end+1} = newInput(lo:hi);
 replayBuffer.peakTgt{end+1} = newTarget(lo:hi);
 replayBuffer.peakVal(end+1) = pkVal;
+replayBuffer.peakAge(end+1) = 0;          % capturée à l'instant
+
+% Éviction par péremption AVANT la sélection par amplitude : une fenêtre trop
+% ancienne est écartée quelle que soit son amplitude. On garde toujours au
+% moins la plus récente, pour ne jamais vider le magasin.
+if isfinite(peakMaxAge)
+    frais = replayBuffer.peakAge <= peakMaxAge;
+    if ~any(frais), frais(end) = true; end
+    replayBuffer.peakIn  = replayBuffer.peakIn(frais);
+    replayBuffer.peakTgt = replayBuffer.peakTgt(frais);
+    replayBuffer.peakVal = replayBuffer.peakVal(frais);
+    replayBuffer.peakAge = replayBuffer.peakAge(frais);
+end
+
 if numel(replayBuffer.peakVal) > maxSegs
     [~, order] = sort(replayBuffer.peakVal, 'descend');
     keep = sort(order(1:maxSegs));
     replayBuffer.peakIn = replayBuffer.peakIn(keep);
     replayBuffer.peakTgt = replayBuffer.peakTgt(keep);
     replayBuffer.peakVal = replayBuffer.peakVal(keep);
+    replayBuffer.peakAge = replayBuffer.peakAge(keep);
 end
 % Always append the stored peak windows to the training set.
 trainInput = [trainInput; vertcat(replayBuffer.peakIn{:})];
