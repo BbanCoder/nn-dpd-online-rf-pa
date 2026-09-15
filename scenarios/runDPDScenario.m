@@ -84,6 +84,7 @@ if cfg.nn.enabled && isfield(cfg,'toolboxes') && cfg.toolboxes.deepLearning
     blockSize = cfg.adaptation.blockSize;
     nBlocks = ceil(N/blockSize);
     yNNAdapt = zeros(N,1);
+    yNNAdaptIn = zeros(N,1);   % entree du PA (signal predistordu) du bras adaptatif
     state.blocksSinceLastUpdate = inf;
     state.numAdaptations = 0;
     state.bestNMSE = inf;       % re-armed after each full recalibration (action grading)
@@ -111,7 +112,23 @@ if cfg.nn.enabled && isfield(cfg,'toolboxes') && cfg.toolboxes.deepLearning
         else
             zBlock = applyNNDPD(xBlock, currentModel, cfg);
         end
-        yBlock = paDynamicModel(zBlock, cfg, profBlock, paType);
+        % --- Continuite de la memoire du PA entre blocs : le modele
+        % d'amplificateur a lui aussi une ligne a retards (cfg.pa.memoryDepth).
+        % Applique bloc par bloc sans historique, ses premiers echantillons
+        % de chaque bloc perdaient leurs termes de memoire, ce qui biaisait
+        % le bras adaptatif de +0,05 dB de NMSE environ, meme sans aucune
+        % mise a jour. On prefixe donc l'entree du PA des derniers
+        % echantillons predistordus du bloc precedent, et on retire le prefixe.
+        Mp = cfg.pa.memoryDepth;
+        if ids(1) > Mp
+            idsExt = (ids(1)-Mp):ids(end);
+            zPrev = yNNAdaptIn(ids(1)-Mp:ids(1)-1);
+            yExt = paDynamicModel([zPrev; zBlock], cfg, sliceProfileLocal(dynProfile, idsExt), paType);
+            yBlock = yExt(Mp+1:end);
+        else
+            yBlock = paDynamicModel(zBlock, cfg, profBlock, paType);
+        end
+        yNNAdaptIn(ids) = zBlock;
         yNNAdapt(ids) = yBlock;
         mAdapt = computeMetricsLocal(yBlock, xBlock, cfg);
         if ~isempty(yNNStatic)
