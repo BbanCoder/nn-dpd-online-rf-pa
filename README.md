@@ -4,7 +4,7 @@ Banc de simulation reproductible accompagnant le mémoire de Master
 **« Adaptation en ligne d'une prédistorsion numérique neuronale pour un
 amplificateur RF en environnement dynamique »**.
 
-MATLAB R2023a · 69 fichiers `.m` · 11 modules · 9 scénarios · 6 méthodes comparées
+MATLAB R2023a · 70 fichiers `.m` · 11 modules · 9 scénarios · 6 méthodes comparées
 
 ---
 
@@ -39,20 +39,31 @@ seul mécanisme.
 
 ## Résultat principal
 
-L'adaptation en ligne est utile **dans un domaine précis, pas universellement**.
+Face à un réseau statique **correctement entraîné**, l'adaptation en ligne
+n'apporte **aucun gain mesurable**, et ne coûte rien non plus. Sur neuf
+scénarios rejoués chacun sur dix graines :
 
 | | |
 |---|---|
-| Sous stress sévère (5G NR, 256-QAM) | gain de **0,29 dB** de NMSE et **1,46 dBc** d'ACPR après dérive, sur les dix graines sans exception |
-| Pendant un transitoire brutal | gain de **0,15 dB**, significatif mais faible |
-| Partout ailleurs | **parité statistique** avec un prédistorteur figé |
-| Désadaptation de charge | aucune méthode ne descend sous ≈ −11 dB : c'est un problème d'égalisation, pas de prédistorsion |
+| Réseau statique face au MP-DPD | devant sur S0 à S5 (**0,5 à 1,3 dB** de NMSE), à égalité en S6, derrière de 0,7 dB sur la porteuse 5G NR (S7) ; mais **2,2 à 2,4 dBc d'ACPR** de moins bien partout |
+| Adaptative face à statique | écart compris entre **−0,07 et +0,14 dB** sur S0 à S7, aucun significatif, malgré jusqu'à 7 mises à jour |
+| Politique apprise (S8) | seul écart reproductible, **−0,07 dB** sur dix graines sur dix, obtenu par des mises à jour faites avant la dérive puis une abstention |
+| Désadaptation de charge (S5) | aucune méthode ne descend sous ≈ −11 dB : c'est un problème d'égalisation, pas de prédistorsion |
 
-Le facteur limitant n'est pas la détection de la dérive, qui fonctionne bien,
-mais **la qualité statistique des mises à jour faites sur peu de données**. Les
-échantillons de forte amplitude sont rares par nature dans un signal à fort
-PAPR, donc sous-représentés dans chaque mini-lot, et le réseau se dégrade
-précisément là où la prédistorsion doit être la plus juste.
+L'apport de l'adaptation **diminue à mesure que le modèle hors ligne
+s'améliore, jusqu'à s'annuler**. Le facteur limitant n'est pas la détection de
+la dérive mais **la qualité statistique des mises à jour faites sur peu de
+données** : les échantillons de forte amplitude sont rares dans un signal à fort
+PAPR, donc sous-représentés dans chaque mini-lot, là où la prédistorsion doit
+être la plus juste.
+
+Une première version de ce banc concluait autrement (gain de 0,29 dB sous
+stress 5G NR). Quatre défauts l'expliquaient, tous corrigés ici : un
+entraînement hors ligne sans validation ni arrêt anticipé, un garde-fou qui
+mesurait la perte sur les données de la mise à jour, et deux artefacts de
+découpage par blocs (ligne à retards du réseau, puis mémoire du PA) qui
+biaisaient le bras adaptatif. Les résultats de cette première version sont
+conservés dans `results/*/archive_*`.
 
 ---
 
@@ -61,7 +72,7 @@ précisément là où la prédistorsion doit être la plus juste.
 ```matlab
 validate_project                                  % vérifie l'installation
 run_all                                           % exécution de référence
-run_montecarlo(1:10, {'S2','S6','S7','S8'})       % analyse statistique
+run_montecarlo(1:10, {'S0','S1','S2','S3','S4','S5','S6','S7','S8'})   % analyse statistique, ~9 h
 ```
 
 `run_train_dqn` réentraîne l'agent de renforcement, en environ 90 minutes. Cette
@@ -125,12 +136,16 @@ réagit, et pas seulement si elle réagit.
 
 ### Quand déclencher
 
-`adaptation/onlineFineTunePolicy.m` compare le NMSE du bloc courant au
-**meilleur NMSE observé depuis le début**, et non à un seuil absolu :
+`adaptation/adaptationScheduler.m` compare le NMSE du bloc courant à la
+**référence saine** observée depuis le début, et non à un seuil absolu. Le seuil
+relatif vaut `max(2 dB, 4·σ_sain)`, où `σ_sain` est l'écart-type du NMSE sur
+les six premiers blocs : un seuil fixe de 2 dB, adapté à un réseau à −18,8 dB,
+réagissait au bruit inter-blocs d'un réseau à −21 dB. `onlineFineTunePolicy.m`
+dose ensuite l'action :
 
 | Dégradation | Action |
 |---|---|
-| < 2 dB | abstention |
+| sous le seuil | abstention |
 | 2 à 4 dB | fine-tuning léger, 2 époques |
 | > 4 dB | fine-tuning fort, 5 époques |
 
@@ -169,11 +184,20 @@ début sont réinjectées de force à chaque mise à jour.
 3. **Normalisation figée** — les vecteurs μ et σ sont hérités de l'entraînement
    hors ligne et ne sont jamais recalculés. Les recalculer déplacerait le repère
    d'entrée et rendrait les nouveaux poids incohérents avec un tronc gelé.
-4. **Garde-fou sur validation** — 25 % du jeu sont tenus à l'écart de
-   l'optimiseur. Si la perte y augmente de plus de 5 %, la mise à jour est
-   annulée. Comparer les pertes d'*apprentissage* ne détecterait rien : le
-   surapprentissage du bloc récent les fait baisser tout en dégradant la
-   généralisation.
+4. **Garde-fou de bout en bout** — le modèle conserve un segment d'ancrage de
+   32 768 échantillons tiré de son jeu de validation, jamais employé pour une
+   mise à jour. Avant et après chaque mise à jour, le NMSE réel (prédistorteur
+   puis PA nominal) y est mesuré ; si la dégradation dépasse 0,1 dB, la mise à
+   jour est annulée et le modèle antérieur restauré. Un garde-fou sur la perte
+   du post-inverse, employé d'abord, ne voyait pas une dégradation concentrée
+   dans les crêtes : une mise à jour pouvait ne la déplacer que de 0,4 % et
+   coûter près d'un décibel de NMSE.
+5. **Continuité entre blocs** — le bras adaptatif traite le signal par blocs de
+   4 096 ; chaque bloc est préfixé des derniers échantillons du précédent, pour
+   la ligne à retards du réseau (`nn.memoryDepth`) comme pour la mémoire du
+   modèle de PA (`pa.memoryDepth`). Sans cela, les premiers échantillons de
+   chaque bloc étaient faux et le bras adaptatif partait avec un handicap,
+   même sans aucune mise à jour.
 
 ---
 
@@ -181,10 +205,11 @@ début sont réinjectées de force à chaque mise à jour.
 
 | Chemin | Contenu |
 |---|---|
-| `results/figures/` | 59 figures PNG |
+| `results/figures/` | figures PNG de l'exécution de référence et synthèses |
 | `results/tables/summary_all_scenarios.csv` | exécution de référence, 45 lignes |
-| `results/montecarlo/montecarlo_raw.csv` | 200 lignes, une par graine × scénario × méthode |
-| `results/sweep_bw_mod/sweep_bande_modulation.csv` | 540 lignes, plan croisé 3 bandes × 4 modulations |
+| `results/montecarlo/montecarlo_raw.csv` | 450 lignes, une par graine × scénario × méthode (9 scénarios × 10 graines) |
+| `results/sweep_bw_mod/sweep_bande_modulation.csv` | 540 lignes, plan croisé 3 bandes × 4 modulations (banc initial, non rejoué) |
+| `results/*/archive_*` | résultats des versions antérieures du banc, conservés pour traçabilité |
 
 Les états MATLAB intermédiaires (`results/**/*.mat`, environ 290 Mo) ne sont pas
 versionnés : ils sont entièrement reconstruits par `run_all.m`. Seul
@@ -229,14 +254,14 @@ reproduire les résultats.
 
 | Signal | | Adaptation en ligne | |
 |---|---|---|---|
-| Fréquence d'échantillonnage | 122,88 MHz | Seuil relatif de NMSE | 2 dB |
+| Fréquence d'échantillonnage | 122,88 MHz | Seuil relatif de NMSE | max(2 dB, 4σ) |
 | Largeur de bande | 40 MHz | Taille de bloc | 4 096 |
 | Modulation | 64-QAM | Ratio de rejeu | 1,0 |
 | Sous-porteuses actives | 334 | Pénalité proximale μ | 0,3 |
 
 | PA et réseau | | Apprentissage | |
 |---|---|---|---|
-| Modèle de PA | MP, ordres 1, 3, 5, 7 | Époques hors ligne | 5 |
+| Modèle de PA | MP, ordres 1, 3, 5, 7 | Époques hors ligne | ≤ 300, arrêt anticipé (patience 8), validation 20 % |
 | Profondeur mémoire | 3 | Époques en ligne | 3 |
 | Architecture | RVTDNN 20–48–32–2 | Pas hors ligne | 5·10⁻⁴ |
 | Poids adaptés en ligne | 66 / 2 642 | Pas en ligne | 5·10⁻⁵ |
